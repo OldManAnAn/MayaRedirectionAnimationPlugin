@@ -4,10 +4,11 @@
         {
             "label": "发送当前脚本到 Maya",
             "type": "process",
-            "command": "D:/Maya2023/bin/mayapy.exe",
+            "command": "C:\\Windows\\System32\\cmd.exe",
             "args": [
-                "${workspaceFolder}/run_to_maya.py",
-                "${file}"
+                "/d",
+                "/c",
+                "\"\"D:\\Maya2023\\bin\\mayapy.exe\" \"${workspaceFolder}\\run_to_maya.py\" \"${file}\"\""
             ],
             "options": {
                 "cwd": "${workspaceFolder}"
