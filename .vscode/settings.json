@@ -1,0 +1,12 @@
+{
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+
+    "python.defaultInterpreterPath": "D:/Maya2023/bin/mayapy.exe",
+    "python.analysis.extraPaths": [
+        "D:/Maya2023/Python/Lib/site-packages",
+        "D:/Maya2023/bin"
+    ],
+    "python.analysis.autoImportCompletions": true,
+    "files.encoding": "utf8"
+
+}
