@@ -4,10 +4,13 @@
     "python.defaultInterpreterPath": "D:/Maya2023/bin/mayapy.exe",
     "python.analysis.extraPaths": [
         "D:/Maya2023/Python/Lib/site-packages",
-        "D:/Maya2023/bin"
+        "D:/Maya2023/bin",
+        "D:/Maya2023/devkit/other/pymel/extras/completion/py",
+        "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python314\\Lib\\site-packages"
     ],
     "python.analysis.autoImportCompletions": true,
-    "files.encoding": "utf8"
-
+    "files.encoding": "utf8",
+    "python.analysis.autoSearchPaths": true,
+    "python.analysis.typeCheckingMode": "basic",
 }
 
