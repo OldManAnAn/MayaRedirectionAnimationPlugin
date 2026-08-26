@@ -12,6 +12,7 @@ import os
 import time
 import json
 import difflib
+import io
 
 import maya.cmds as cmds
 import maya.mel as mel
@@ -26,6 +27,7 @@ class RetargetTool(object):
     """Matrix based, non-destructive animation retargeting UI."""
 
     def __init__(self):
+        # 初始化映射数据、UI 控件引用和运行状态
         self.rows = []
         self.cancel_requested = False
         self.progress = None
@@ -51,76 +53,90 @@ class RetargetTool(object):
         if cmds.window(WINDOW_NAME, exists=True):
             cmds.deleteUI(WINDOW_NAME)
 
-        window = cmds.window(WINDOW_NAME, title="W 动画重定向工具 - 优化版",
-                             sizeable=True, widthHeight=(900, 560),
-                             minimizeButton=True, maximizeButton=False)
-        # 主容器：所有步骤容器都应该直接挂在这里，避免步骤 4 包住步骤 5/6。
-        self.main_layout = cmds.columnLayout(adjustableColumn=True, rowSpacing=4)
+        window = cmds.window(WINDOW_NAME, title="动画重定向工具 - 优化版",
+                             sizeable=True, widthHeight=(600, 650),
+                             minimizeButton=True, maximizeButton=False,)
+        # 主容器使用滚动布局，窄屏和大量映射行时仍可操作。
+        self.main_scroll = cmds.scrollLayout(childResizable=True,
+                                              horizontalScrollBarThickness=12,
+                                              verticalScrollBarThickness=14,
+                                              minChildWidth=480)
+        self.main_layout = cmds.columnLayout(adjustableColumn=True, rowSpacing=3)
+        cmds.text(label="动画重定向工具 - 优化版",
+                  align="left", height=25,
+                  font="boldLabelFont",
+                  backgroundColor=(0.12, 0.16, 0.22))
+        cmds.text(label="矩阵动画重定向 · 骨骼映射 · FBX 导出————by:hanan",
+                  align="left", height=18,
+                  enable=False)
         # 顶部工具栏：把高频的说明、预设和界面操作集中到一处。
         self.toolbar = cmds.frameLayout(label="工具栏", collapsable=False,
-                                        marginWidth=5, marginHeight=3,
+                                        marginWidth=3, marginHeight=2,
                                         backgroundColor=(0.16, 0.18, 0.22))
-        cmds.rowLayout(numberOfColumns=6, columnWidth6=(145, 145, 145, 145, 145, 145))
-        cmds.button(label="使用说明", command=lambda *_: self.show_help())
-        cmds.button(label="保存映射预设", command=lambda *_: self.save_mapping_preset())
-        cmds.button(label="载入映射预设", command=lambda *_: self.load_mapping_preset())
-        cmds.button(label="清空手动映射", command=lambda *_: self._clear_rows())
-        cmds.button(label="移除空行", command=lambda *_: self._remove_empty_rows())
-        cmds.button(label="重置候选列表", command=lambda *_: self._clear_candidates())
+        cmds.rowLayout(numberOfColumns=6, adjustableColumn=1,
+                       columnWidth=[(1, 100), (2, 100), (3, 100),
+                                    (4, 100), (5, 100), (6, 100)])
+        cmds.button(label="使用说明", width=100, height=24, command=lambda *_: self.show_help())
+        cmds.button(label="保存映射预设", width=100, height=24, command=lambda *_: self.save_mapping_preset())
+        cmds.button(label="载入映射预设", width=100, height=24, command=lambda *_: self.load_mapping_preset())
+        cmds.button(label="清空手动映射", width=100, height=24, command=lambda *_: self._clear_rows())
+        cmds.button(label="移除空行", width=100, height=24, command=lambda *_: self._remove_empty_rows())
+        cmds.button(label="清除候选", width=100, height=24, command=lambda *_: self._clear_candidates())
         cmds.setParent("..")
         cmds.setParent("..")
         cmds.text(label="矩阵动画重定向：源对象与目标对象应在起始帧保持相同的绑定／初始姿势",
                   align="left")
-        cmds.button(label="打开使用说明", height=24, command=lambda *_: self.show_help())
+        cmds.button(label="打开使用说明", width=100, height=24, command=lambda *_: self.show_help())
 
         # ==================== 步骤 1：帧范围 ====================
         # frameLayout 是可折叠的父容器；修改 collapse=True 可让它默认收起。
         self.range_frame = cmds.frameLayout(label="步骤 1：动画范围与烘焙选项",
                                              collapsable=True, collapse=False,
-                                             marginWidth=8, marginHeight=6,
+                                             marginWidth=0, marginHeight=0,
                                              backgroundColor=(0.18, 0.22, 0.28))
         # rowLayout 按列排列控件。columnWidth5 中的数字依次对应 5 列宽度；
         # 如果某列太宽会产生空隙，太窄则会遮挡文字。
         cmds.rowLayout(numberOfColumns=5, adjustableColumn=5,
-                       columnWidth5=(55, 80, 80, 120, 115),
-                       columnAttach=[(1, "both", 2), (2, "both", 2),
-                                     (3, "both", 2), (4, "both", 2),
-                                     (5, "both", 2)])
-        cmds.text(label="帧范围")
+                       columnWidth5=(80, 80, 80, 80, 80),
+                       columnAttach=[(1, "both", 0), (2, "both", 0),
+                                     (3, "both", 0), (4, "both", 0),
+                                     (5, "both", 0)])
+        cmds.text(label="帧范围",width=80,align="center",backgroundColor=(0.0, 0.0, 0.1),height=24,wordWrap=True,recomputeSize=False,)
         self.start_field = cmds.intFieldGrp(label="开始", numberOfFields=1, value1=0,
-                                             columnWidth2=(35, 75))
+                                             columnWidth2=(35, 35),backgroundColor=(0.266667, 0.266667, 0.266667),)
         self.end_field = cmds.intFieldGrp(label="结束", numberOfFields=1, value1=20,
-                                           columnWidth2=(35, 75))
-        self.key_all_field = cmds.checkBox(label="逐帧烘焙", value=True)
-        cmds.button(label="新增映射行", command=lambda *_: self._add_row())
+                                           columnWidth2=(35, 35),backgroundColor=(0.266667, 0.266667, 0.266667),)
+        self.key_all_field = cmds.checkBox(label="逐帧烘焙", value=True,width=80,height=24,backgroundColor=(0.266667, 0.266667, 0.266667),align="center",)
+        cmds.button(label="新增映射行", command=lambda *_: self._add_row(),width=120,height=24,align="center")
         cmds.setParent("..")
 
-        cmds.rowLayout(numberOfColumns=3, columnWidth3=(165, 180, 220),
-                       columnAttach=[(1, "both", 2), (2, "both", 2),
-                                     (3, "both", 2)])
-        self.match_root_translation_field = cmds.checkBox(label="同步映射根节点的位置", value=False)
-        self.key_bind_pose_field = cmds.checkBox(label="在开始帧写入姿势关键帧", value=True)
+        cmds.rowLayout(numberOfColumns=3, adjustableColumn=3,
+                       columnWidth3=(160, 160, 80),
+                       columnAttach=[(1, "both", 0), (2, "both", 0),
+                                     (3, "both", 0)])
+        self.match_root_translation_field = cmds.checkBox(label="同步映射根节点的位置", value=False,width=160,height=24,backgroundColor=(0.266667, 0.266667, 0.266667),align="center",)
+        self.key_bind_pose_field = cmds.checkBox(label="在开始帧写入姿势关键帧", value=True,width=160,height=24,backgroundColor=(0.266667, 0.266667, 0.266667),align="center",)
         cmds.button(label="目标匹配源初始姿势", backgroundColor=(0.35, 0.60, 0.85),
-                    command=lambda *_: self.match_initial_pose())
+                    command=lambda *_: self.match_initial_pose(),width=120,height=24,align="center")
         cmds.setParent("..")
         cmds.setParent("..")
 
         # ==================== 步骤 2：快速映射 ====================
         self.quick_frame = cmds.frameLayout(label="步骤 2：快速建立骨骼映射",
                                              collapsable=True, collapse=False,
-                                             marginWidth=8, marginHeight=6,
+                                             marginWidth=0, marginHeight=0,
                                              backgroundColor=(0.20, 0.25, 0.30))
-        cmds.rowLayout(numberOfColumns=6, adjustableColumn=2,
-                       columnWidth=[(1, 40), (2, 175), (3, 52),
-                                    (4, 175), (5, 52), (6, 115)],
-                       columnAttach=[(1, "both", 2), (2, "both", 2),
-                                     (3, "both", 2), (4, "both", 2),
-                                     (5, "both", 2), (6, "both", 2)])
-        cmds.text(label="源根")
-        self.source_root_field = cmds.textField()
-        cmds.button(label="设源根", command=lambda *_: self._set_selected(self.source_root_field))
+        cmds.rowLayout(numberOfColumns=6, adjustableColumn=6,
+                       columnWidth=[(1, 80), (2, 80), (3, 80),
+                                    (4, 80), (5, 80), (6, 80)],
+                       columnAttach=[(1, "both", 0), (2, "both", 0),
+                                     (3, "both", 0), (4, "both", 0),
+                                     (5, "both", 0), (6, "both", 0)])
+        cmds.text(label="源根",width=80,align="center",backgroundColor=(0.0, 0.0, 0.1),height=24,wordWrap=True,recomputeSize=False,)
+        self.source_root_field = cmds.textField(width=80, height=24)
+        cmds.button(label="设源根", command=lambda *_: self._set_selected(self.source_root_field),align="center")
         self.target_root_field = cmds.textField(placeholderText="目标骨架根节点")
-        cmds.button(label="设目标根", command=lambda *_: self._set_selected(self.target_root_field))
+        cmds.button(label="设目标根", command=lambda *_: self._set_selected(self.target_root_field),align="center")
         cmds.button(label="生成候选", backgroundColor=(0.55, 0.65, 0.85),
                     command=lambda *_: self.auto_match_hierarchies())
         cmds.setParent("..")
@@ -128,33 +144,41 @@ class RetargetTool(object):
 
         # ==================== 步骤 3：候选确认 ====================
         self.candidate_frame = cmds.frameLayout(label="步骤 3：候选映射确认与预设",
-                                                 collapsable=True, collapse=True,
-                                                 marginWidth=8, marginHeight=6,
+                                                 collapsable=True, collapse=False,
+                                                 marginWidth=0, marginHeight=0,
                                                  backgroundColor=(0.22, 0.26, 0.30))
 
-        cmds.rowLayout(numberOfColumns=5, adjustableColumn=2,
-                       columnWidth=[(1, 62), (2, 340), (3, 52), (4, 45), (5, 82)],
-                       columnAttach=[(1, "both", 2), (2, "both", 2),
-                                     (3, "both", 2), (4, "both", 2),
-                                     (5, "both", 2)])
-        cmds.text(label="替换规则")
+        cmds.rowLayout(numberOfColumns=5, adjustableColumn=4,
+                       columnWidth=[(1, 120), (2, 120), (3, 120), (4, 120), (5, 120)],
+                       columnAttach=[(1, "both", 0), (2, "both", 0),
+                                     (3, "both", 0), (4, "both", 0),
+                                     (5, "both", 0)])
+        cmds.text(label="替换规则",width=120,align="center",backgroundColor=(0.0, 0.0, 0.1),height=24,wordWrap=True,recomputeSize=False,)
         self.name_rules_field = cmds.textField(
             placeholderText="源名称替换为目标名称，例如：mixamorig:=;Left=L_;Right=R_")
-        cmds.text(label="相似度")
+        cmds.text(label="相似度",width=120,align="center",backgroundColor=(0.0, 0.0, 0.1),height=24,wordWrap=True,recomputeSize=False,)
         self.fuzzy_threshold_field = cmds.intField(value=72, minValue=50, maxValue=100)
         cmds.button(label="生成候选", command=lambda *_: self.auto_match_hierarchies())
         cmds.setParent("..")
         cmds.text(label="候选映射（可多选；请确认后再应用）", align="left")
-        self.candidate_list = cmds.textScrollList(numberOfRows=3, height=72,
+        self.candidate_list = cmds.textScrollList(numberOfRows=4, height=120, 
                                                   allowMultiSelection=True,
                                                   selectCommand=lambda *_: self.select_candidate_bone("source"))
-        cmds.rowLayout(numberOfColumns=4, columnWidth4=(190, 190, 190, 190))
-        cmds.text(label="匹配类型：", align="right")
-        cmds.text(label="层级路径 / 唯一同名 / 相似名称", align="left", backgroundColor=(0.25, 0.35, 0.25))
-        cmds.text(label="相似名称需人工确认", align="left", backgroundColor=(0.40, 0.32, 0.18))
-        cmds.text(label="候选不会自动覆盖手动映射", align="left")
+        cmds.rowLayout(numberOfColumns=4, adjustableColumn=2,
+                       columnWidth4=(150, 150, 150, 150),
+                       columnAttach=[(1, "both", 0), (2, "both", 0),
+                                    (3, "both", 0), (4, "both", 0),
+                                    (5, "both", 0)])
+        cmds.text(label="匹配类型：", width=120,height=24,align="center",backgroundColor=(0.0, 0.0, 0.1),wordWrap=True,recomputeSize=False,)
+        cmds.text(label="层级路径 / 唯一同名 / 相似名称", width=120,height=24, align="center", backgroundColor=(0.25, 0.35, 0.25),recomputeSize=True,)
+        cmds.text(label="相似名称需人工确认", width=120,height=24, align="center", backgroundColor=(0.40, 0.32, 0.18))
+        cmds.text(label="候选不会自动覆盖手动映射", width=120,height=24, align="center",backgroundColor=(0.0, 0.0, 0.1))
         cmds.setParent("..")
-        cmds.rowLayout(numberOfColumns=6, columnWidth6=(105, 105, 135, 135, 115, 115))
+        cmds.rowLayout(numberOfColumns=6, adjustableColumn=4,
+                       columnWidth6=(100, 100, 100, 100, 100, 100),
+                       columnAttach=[(1, "both", 0), (2, "both", 0),
+                                    (3, "both", 0), (4, "both", 0),
+                                    (5, "both", 0)])
         cmds.button(label="选择源骨骼", command=lambda *_: self.select_candidate_bone("source"))
         cmds.button(label="选择目标骨骼", command=lambda *_: self.select_candidate_bone("target"))
         cmds.button(label="应用选中候选", command=lambda *_: self.apply_candidates(selected_only=True))
@@ -168,9 +192,9 @@ class RetargetTool(object):
         # ==================== 步骤 4：手动映射 ====================
         self.mapping_frame = cmds.frameLayout(label="步骤 4：手动骨骼映射（点击名称可在场景中选中）",
                                                collapsable=True, collapse=False,
-                                               marginWidth=6, marginHeight=4)
+                                               marginWidth=0, marginHeight=0)
         self.mapping_scroll = cmds.scrollLayout(parent=self.mapping_frame,
-                                                childResizable=True, height=125)
+                                                childResizable=True, height=165)
         self.mapping_layout = cmds.columnLayout(adjustableColumn=True, rowSpacing=2)
         for _ in range(3):
             self._add_row()
@@ -185,47 +209,56 @@ class RetargetTool(object):
         # ==================== 步骤 5：执行 ====================
         self.execute_frame = cmds.frameLayout(label="步骤 5：执行重定向",
                                                collapsable=True, collapse=False,
-                                               marginWidth=8, marginHeight=6,
+                                               marginWidth=0, marginHeight=0,
                                                backgroundColor=(0.20, 0.28, 0.22))
-        cmds.rowLayout(numberOfColumns=4, adjustableColumn=1,
-                       columnWidth4=(170, 150, 100, 150))
-        cmds.button(label="移除空映射", command=lambda *_: self._remove_empty_rows())
-        cmds.button(label="全部重定向", backgroundColor=(0.35, 0.75, 0.35),
+        cmds.rowLayout(numberOfColumns=4, adjustableColumn=2,
+                       columnWidth4=(150, 150, 150, 150))
+        cmds.button(label="移除空映射", width=150, height=24, command=lambda *_: self._remove_empty_rows())
+        cmds.button(label="开始重定向", width=150, height=24,
+                    backgroundColor=(0.30, 0.68, 0.32),
+                    annotation="根据当前映射和帧范围执行动画重定向",
                     command=lambda *_: self.retarget_all())
-        cmds.button(label="取消", backgroundColor=(0.8, 0.45, 0.25),
+        cmds.button(label="取消", width=150, height=24,
+                    backgroundColor=(0.78, 0.40, 0.20),
                     command=lambda *_: self._request_cancel())
-        cmds.button(label="清空映射", command=lambda *_: self._clear_rows())
+        cmds.button(label="清空映射", width=150, height=24, command=lambda *_: self._clear_rows())
         cmds.setParent("..")
 
         # Keep progress controls in a fixed-width row.  Long DAG paths in a
         # status label must not force Maya to resize the whole window.
-        cmds.rowLayout(numberOfColumns=2, columnWidth2=(100, 700))
-        cmds.text(label="执行进度", align="left")
-        self.progress = cmds.progressBar(maxValue=1, width=700)
+        cmds.rowLayout(numberOfColumns=2, adjustableColumn=2,
+                       columnWidth2=(100, 500),
+                        columnAttach=[(1, "both", 0), (2, "both", 0)])
+        cmds.text(label="执行进度",  width=120,height=24,align="center",backgroundColor=(0.0, 0.0, 0.1),wordWrap=True,recomputeSize=False,)
+        self.progress = cmds.progressBar(maxValue=1)
         cmds.setParent("..")
-        self.status = cmds.text(label="就绪", align="left", width=800)
+        self.status = cmds.text(label="就绪", align="left")
         cmds.setParent("..")
         cmds.separator(style="in")
 
         # ==================== 步骤 6：导出 ====================
         self.export_frame = cmds.frameLayout(label="步骤 6：FBX 导出（可选）",
                                               collapsable=True, collapse=True,
-                                              marginWidth=8, marginHeight=6,
+                                              marginWidth=0, marginHeight=0,
                                               backgroundColor=(0.28, 0.24, 0.18))
         scene_path = cmds.file(query=True, sceneName=True) or ""
         default_path = os.path.dirname(scene_path) if scene_path else ""
-        cmds.rowLayout(numberOfColumns=3, adjustableColumn=2, columnWidth3=(120, 570, 110))
-        cmds.text(label="FBX 输出文件夹")
+        cmds.rowLayout(numberOfColumns=3, adjustableColumn=2, columnWidth3=(120, 220, 110))
+        cmds.text(label="FBX 输出文件夹", width=120,height=24,align="center",backgroundColor=(0.0, 0.0, 0.1),wordWrap=True,recomputeSize=False,)
         self.export_path_field = cmds.textField(text=default_path)
         cmds.button(label="选择...", command=lambda *_: self._choose_export_folder())
         cmds.setParent("..")
-        cmds.rowLayout(numberOfColumns=2, columnWidth2=(230, 200))
+        cmds.rowLayout(numberOfColumns=2, adjustableColumn=2,
+                       columnWidth2=(300, 300), columnAttach=[(1, "both", 0), (2, "both", 0)])
         cmds.button(label="将目标节点导出为 FBX", command=lambda *_: self.export_targets())
-        cmds.text(label="仅导出映射中填写的目标节点", align="left")
+        cmds.text(label="仅导出映射中填写的目标节点", width=300,height=24,align="center",backgroundColor=(0.0, 0.0, 0.1),wordWrap=True,recomputeSize=False,)
         cmds.setParent("..")
         cmds.setParent("..")
 
+        cmds.setParent("..")
+        cmds.setParent("..")
         cmds.showWindow(window)
+        cmds.window(window, edit=True, sizeable=True)
 
     def _add_row(self):
         # 手动映射的一行布局顺序：
@@ -235,23 +268,25 @@ class RetargetTool(object):
         # The generic columnWidth flag works across Maya releases and keeps
         # this dynamic mapping row within the fixed window width.
         row = cmds.rowLayout(parent=self.mapping_layout, numberOfColumns=8,
+                             adjustableColumn=2,
+                             height=24,
                              # 不设置 adjustableColumn，避免第 2 列被 Maya
                              # 自动拉伸，导致修改 columnWidth 后看不到变化。
-                             columnWidth=[(1, 28), (2, 185), (3, 48),
-                                          (4, 185), (5, 48), (6, 175),
-                                          (7, 48), (8, 32)],
+                             columnWidth=[(1, 75), (2, 75), (3, 75),
+                                          (4, 75), (5, 75), (6, 75),
+                                          (7, 75), (8, 75)],
                              columnAttach=[(1, "both", 1), (2, "both", 1),
                                            (3, "both", 1), (4, "both", 1),
                                            (5, "both", 1), (6, "both", 1),
                                            (7, "both", 1), (8, "both", 1)])
-        cmds.text(label="源")
+        cmds.text(label="源骨骼",width=80,align="center",backgroundColor=(0.0, 0.0, 0.1),height=24,wordWrap=True,recomputeSize=False,)
         source = cmds.textField(enterCommand=lambda *_: self._select_field_node(source),
                                 receiveFocusCommand=lambda *_: self._select_field_node(source))
         cmds.button(label="选源", command=lambda *_: self._set_selected(source))
         target = cmds.textField(placeholderText="目标对象",
                                 enterCommand=lambda *_: self._select_field_node(target),
                                 receiveFocusCommand=lambda *_: self._select_field_node(target))
-        cmds.button(label="设目标", command=lambda *_: self._set_selected(target))
+        cmds.button(label="目标骨骼", command=lambda *_: self._set_selected(target))
         relative = cmds.textField(placeholderText="可选：相对参考对象",
                                   enterCommand=lambda *_: self._select_field_node(relative),
                                   receiveFocusCommand=lambda *_: self._select_field_node(relative))
@@ -278,17 +313,28 @@ class RetargetTool(object):
         if not selection:
             cmds.warning("请先选择一个变换节点。")
             return
-        cmds.textField(field, edit=True, text=self._display_node_name(selection[0]),
+        cmds.textField(field, edit=True, text=selection[0],
                        annotation=selection[0])
+
+    @staticmethod
+    def _field_value(field):
+        """Read exactly what is shown in the mapping field.
+
+        The reference tool intentionally treats the text field as the source
+        of truth.  Do not silently substitute an annotation or another node
+        resolved by short name: Maya allows duplicate leaf names and that can
+        redirect animation to the wrong skeleton.
+        """
+        return cmds.textField(field, query=True, text=True).strip()
 
     def _clear_rows(self):
         for row in self.rows:
             for field in (row["source"], row["target"], row["relative"]):
-                cmds.textField(field, edit=True, text="")
+                cmds.textField(field, edit=True, text="", annotation="")
 
     def _remove_empty_rows(self):
         for row in list(self.rows):
-            if not cmds.textField(row["source"], query=True, text=True).strip() and not cmds.textField(row["target"], query=True, text=True).strip():
+            if not self._field_value(row["source"]) and not self._field_value(row["target"]):
                 self._delete_row(row["layout"])
         if not self.rows:
             self._add_row()
@@ -322,8 +368,8 @@ class RetargetTool(object):
 
     def _first_empty_row(self):
         for row in self.rows:
-            source = cmds.textField(row["source"], query=True, text=True).strip()
-            target = cmds.textField(row["target"], query=True, text=True).strip()
+            source = self._field_value(row["source"])
+            target = self._field_value(row["target"])
             if not source and not target:
                 return row
         self._add_row()
@@ -400,8 +446,8 @@ class RetargetTool(object):
         """Append pairs without replacing any complete manual mapping rows."""
         existing = set()
         for row in self.rows:
-            source = cmds.textField(row["source"], query=True, text=True).strip()
-            target = cmds.textField(row["target"], query=True, text=True).strip()
+            source = self._field_value(row["source"])
+            target = self._field_value(row["target"])
             if source and target:
                 existing.add((source, target))
         added = 0
@@ -409,9 +455,9 @@ class RetargetTool(object):
             if (source, target) in existing:
                 continue
             row = self._first_empty_row()
-            cmds.textField(row["source"], edit=True, text=self._display_node_name(source),
+            cmds.textField(row["source"], edit=True, text=source,
                            annotation=source)
-            cmds.textField(row["target"], edit=True, text=self._display_node_name(target),
+            cmds.textField(row["target"], edit=True, text=target,
                            annotation=target)
             existing.add((source, target))
             added += 1
@@ -547,16 +593,16 @@ class RetargetTool(object):
             path += ".json"
         mappings = []
         for row in self.rows:
-            source = cmds.textField(row["source"], query=True, text=True).strip()
-            target = cmds.textField(row["target"], query=True, text=True).strip()
-            relative = cmds.textField(row["relative"], query=True, text=True).strip()
+            source = self._field_value(row["source"])
+            target = self._field_value(row["target"])
+            relative = self._field_value(row["relative"])
             if source and target:
                 mappings.append({"source": source, "target": target, "relative": relative})
         data = {"format": "WRetargetToolPreset", "version": 1,
                 "name_rules": cmds.textField(self.name_rules_field, query=True, text=True),
                 "mappings": mappings}
         try:
-            with open(path, "w") as handle:
+            with io.open(path, "w", encoding="utf-8") as handle:
                 json.dump(data, handle, indent=2, ensure_ascii=False)
             cmds.text(self.status, edit=True, label="已保存 {0} 组映射预设。".format(len(mappings)))
         except Exception as error:
@@ -568,7 +614,7 @@ class RetargetTool(object):
         if not result:
             return
         try:
-            with open(result[0], "r") as handle:
+            with io.open(result[0], "r", encoding="utf-8") as handle:
                 data = json.load(handle)
             if data.get("format") != "WRetargetToolPreset":
                 raise RuntimeError("这不是 W Retarget Tool 的映射预设文件。")
@@ -581,9 +627,9 @@ class RetargetTool(object):
                 source = mapping.get("source", "")
                 target = mapping.get("target", "")
                 relative = mapping.get("relative", "")
-                cmds.textField(row["source"], edit=True, text=self._display_node_name(source), annotation=source)
-                cmds.textField(row["target"], edit=True, text=self._display_node_name(target), annotation=target)
-                cmds.textField(row["relative"], edit=True, text=self._display_node_name(relative) if relative else "", annotation=relative)
+                cmds.textField(row["source"], edit=True, text=source, annotation=source)
+                cmds.textField(row["target"], edit=True, text=target, annotation=target)
+                cmds.textField(row["relative"], edit=True, text=relative if relative else "", annotation=relative)
             cmds.textField(self.name_rules_field, edit=True, text=data.get("name_rules", ""))
             cmds.text(self.status, edit=True, label="已载入 {0} 组映射预设。".format(len(mappings)))
         except Exception as error:
@@ -633,9 +679,9 @@ class RetargetTool(object):
         mappings = []
         errors = []
         for index, row in enumerate(self.rows, 1):
-            source = cmds.textField(row["source"], query=True, text=True).strip()
-            target = cmds.textField(row["target"], query=True, text=True).strip()
-            relative = cmds.textField(row["relative"], query=True, text=True).strip()
+            source = self._field_value(row["source"])
+            target = self._field_value(row["target"])
+            relative = self._field_value(row["relative"])
             if not source and not target:
                 continue
             if not source or not target:
@@ -695,6 +741,15 @@ class RetargetTool(object):
         cmds.parent(tgt_delta, tgt_parent)
         target_proxy = cmds.createNode("transform", name="wrRetarget_targetProxy#")
 
+        # decomposeMatrix defaults to XYZ.  That is incorrect for many rigs
+        # (especially imported FBX skeletons) whose joints use a different
+        # rotateOrder.  Match the temporary driver and decomposition order to
+        # the actual target joint so the resulting Euler channels preserve the
+        # intended world orientation.
+        if cmds.objExists(target + ".rotateOrder"):
+            target_rotate_order = cmds.getAttr(target + ".rotateOrder")
+            cmds.setAttr(tgt_delta + ".rotateOrder", target_rotate_order)
+
         # Capture source and target parent spaces at the start frame.
         cmds.delete(cmds.pointConstraint(source, src_parent))
         source_parent = relative or (cmds.listRelatives(source, parent=True, fullPath=True) or [None])[0]
@@ -712,6 +767,8 @@ class RetargetTool(object):
 
         matrix = cmds.createNode("multMatrix", name="wrRetarget_matrix#")
         decompose = cmds.createNode("decomposeMatrix", name="wrRetarget_decompose#")
+        if cmds.objExists(target + ".rotateOrder") and cmds.objExists(decompose + ".inputRotateOrder"):
+            cmds.setAttr(decompose + ".inputRotateOrder", target_rotate_order)
         cmds.connectAttr(src_local + ".worldMatrix[0]", matrix + ".matrixIn[0]", force=True)
         cmds.connectAttr(src_parent + ".worldInverseMatrix[0]", matrix + ".matrixIn[1]", force=True)
         cmds.connectAttr(matrix + ".matrixSum", decompose + ".inputMatrix", force=True)
@@ -797,7 +854,8 @@ class RetargetTool(object):
             # target parent space, rather than yesterday's pose.
             for source, target, _ in sorted(mappings, key=lambda item: self._dag_depth(item[1])):
                 try:
-                    orient_constraint = cmds.orientConstraint(source, target, maintainOffset=False)
+                    orient_constraint = cmds.orientConstraint(
+                        source, target, maintainOffset=False)
                     cmds.delete(orient_constraint)
                     if copy_root_translation and target in roots:
                         point_constraint = cmds.pointConstraint(source, target, maintainOffset=False)
