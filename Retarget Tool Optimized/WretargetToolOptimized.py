@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# pyright: reportArgumentType=false
 """W Retarget Tool Optimized.
 
 UI 注释版：界面布局说明集中在 RetargetTool._build_ui 和 _add_row。

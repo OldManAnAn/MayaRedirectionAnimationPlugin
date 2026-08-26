@@ -11,6 +11,8 @@
     "python.analysis.autoImportCompletions": true,
     "files.encoding": "utf8",
     "python.analysis.autoSearchPaths": true,
-    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.typeCheckingMode": "off",
+    "reportArgumentType": "none",
+    
 }
 
