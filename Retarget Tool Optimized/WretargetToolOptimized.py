@@ -127,7 +127,7 @@ class RetargetTool(object):
         self.key_all_field = cmds.checkBox(label="逐帧烘焙", value=True,width=80,height=24,backgroundColor=(0.266667, 0.266667, 0.266667),align="center",)
         cmds.button(label="新增映射行", command=lambda *_: self._add_row(),width=120,height=24,align="center")
         cmds.setParent("..")
-        cmds.text(label="初始姿势自动匹配不好用最好手动设置",width=80,align="center",backgroundColor=(0.5, 0.5, 0.0),height=24,wordWrap=True,recomputeSize=False,)
+        cmds.text(label="初始姿势自动匹配不好用，最好手动调节，让目标骨骼和源骨骼动作接近一致",width=80,align="center",backgroundColor=(0.5, 0.5, 0.0),height=24,wordWrap=True,recomputeSize=False,)
         cmds.rowLayout(numberOfColumns=3, adjustableColumn=3,
                        columnWidth3=(160, 160, 80),
                        columnAttach=[(1, "both", 0), (2, "both", 0),
